@@ -1,0 +1,82 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /**
+     * وظائف مساعدة للتحقق من الصلاحيات
+     */
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        (request.auth.token.email.lower() in ['x7oud3@gmail.com', 'tqnyat.store.official@gmail.com', 'techstore.eg.app@gmail.com']) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'user') in ['admin', 'moderator'])
+      );
+    }
+
+    /**
+     * قواعد المستخدمين
+     */
+    match /users/{userId} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isAdmin() || (isOwner(userId) && request.resource.data.get('role', 'user') == resource.data.get('role', 'user'));
+      allow delete: if isAdmin();
+      
+      match /downloads/{docId} { allow read, write: if isOwner(userId) || isAdmin(); }
+      match /bookmarks/{docId} { allow read, write: if isOwner(userId) || isAdmin(); }
+    }
+
+    /**
+     * قواعد التطبيقات والألعاب
+     */
+    match /apps/{appId} {
+      allow read: if true;
+      allow create: if isSignedIn();
+      allow update: if isAdmin() 
+        || (isSignedIn() && resource.data.authorId == request.auth.uid) 
+        || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['downloads']));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+
+      match /reviews/{reviewId} {
+        allow read: if true;
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      }
+    }
+
+    match /articles/{articleId} {
+      allow read: if true;
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['views']));
+    }
+
+    match /app_submissions/{submissionId} {
+      allow create: if isSignedIn();
+      allow get, list, update, delete: if isAdmin() || (isSignedIn() && resource.data.authorId == request.auth.uid);
+    }
+
+    match /contactMessages/{messageId} {
+      allow create: if true;
+      allow read, write: if isAdmin();
+    }
+
+    match /broadcasts/{broadcastId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /trash_apps/{id} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.originalData.authorId == request.auth.uid);
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}
